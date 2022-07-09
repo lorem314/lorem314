@@ -8,7 +8,7 @@
     "gatsby"
   ],
   "scripts": {
-    "develop": "gatsby develop",
+    "dev": "gatsby develop --host 0.0.0.0 --port 8080",
     "start": "gatsby develop",
     "build": "gatsby build",
     "serve": "gatsby serve",
@@ -26,12 +26,22 @@
     "gatsby-plugin-sharp": "^4.16.1",
     "gatsby-plugin-sitemap": "^5.16.0",
     "gatsby-plugin-styled-components": "^5.16.0",
+    "gatsby-remark-autolink-headers": "^5.16.0",
+    "gatsby-remark-images": "^6.16.0",
+    "gatsby-remark-prismjs": "^6.16.0",
+    "gatsby-remark-relative-images": "^2.0.2",
     "gatsby-source-filesystem": "^4.16.0",
     "gatsby-transformer-remark": "^5.16.0",
     "gatsby-transformer-sharp": "^4.16.0",
+    "prismjs": "^1.28.0",
     "react": "^18.1.0",
     "react-dom": "^18.1.0",
     "react-helmet": "^6.1.0",
+    "react-redux": "^8.0.2",
+    "redux": "^4.1.2",
     "styled-components": "^5.3.5"
+  },
+  "devDependencies": {
+    "gatsby-remark-code-titles": "^1.1.0"
   }
 }

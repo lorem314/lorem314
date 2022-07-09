@@ -52,3 +52,41 @@
 Deploy this starter with one click on [Gatsby Cloud](https://www.gatsbyjs.com/cloud/):
 
 [<img src="https://www.gatsbyjs.com/deploynow.svg" alt="Deploy to Gatsby Cloud">](https://www.gatsbyjs.com/dashboard/deploynow?url=https://github.com/gatsbyjs/gatsby-starter-minimal)
+
+<!--
+
+===========================================================
+blog post frontmatter
+
+title       标题                ""
+created     创建日期             ""
+tags        标签                [""]
+
+coverImage  封面路径              ""
+unsplashUrl unsplash封面url       ""
+
+bdCloud     百度网盘链接          ""
+biliVideo   B站视频链接           ""
+
+
+
+===========================================================
+book cover frontmatter
+
+title       标题                ""
+created     创建日期             ""
+tags        标签                [""]
+
+coverImage  封面路径              ""
+
+
+
+===========================================================
+book chapter frontmatter
+
+
+
+
+
+
+-->

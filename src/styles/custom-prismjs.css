@@ -1,0 +1,229 @@
+/*
+ * gatsby prismjs
+ */
+code[class*="language-"],
+pre[class*="language-"] {
+  color: #e4f8ff;
+  font-family: "Fira Code", "Courier New", Courier, "Source Code Pro Black It",
+    "MyConsolas", Consolas, "Mononoki", "Inconsolata", "Roboto", Monaco,
+    "Andale Mono", monospace;
+
+  font-size: 1em;
+  text-align: left;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+  word-wrap: normal;
+
+  line-height: 1.5;
+
+  -moz-tab-size: 4;
+  -o-tab-size: 4;
+  tab-size: 4;
+
+  -webkit-hyphens: none;
+  -moz-hyphens: none;
+  -ms-hyphens: none;
+  hyphens: none;
+}
+
+pre[class*="language-"]::-moz-selection,
+pre[class*="language-"] ::-moz-selection,
+code[class*="language-"]::-moz-selection,
+code[class*="language-"] ::-moz-selection {
+  background: #073642;
+}
+
+pre[class*="language-"]::selection,
+pre[class*="language-"] ::selection,
+code[class*="language-"]::selection,
+code[class*="language-"] ::selection {
+  background: #073642;
+}
+
+/* Code blocks */
+pre[class*="language-"] {
+  padding: 1em;
+  margin: 0.5em 0;
+  overflow: auto;
+  border-radius: 0.3em;
+}
+
+:not(pre) > code[class*="language-"],
+pre[class*="language-"] {
+  background-color: #131212;
+}
+
+/* Inline code */
+:not(pre) > code[class*="language-"] {
+  padding: 0.1em;
+  border-radius: 0.3em;
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #95c085;
+}
+
+.token.punctuation {
+  color: #e4f8ff;
+}
+
+.token.namespace {
+  opacity: 0.7;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #b5cea8;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.url,
+.token.inserted {
+  color: #ce9178;
+}
+
+.token.entity {
+  color: #a89984;
+  background: #131212;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #358cd6;
+}
+
+.token.function,
+.token.class-name {
+  color: #dcdcaa;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #d16969;
+}
+
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+.token.italic {
+  font-style: italic;
+}
+
+.token.entity {
+  cursor: help;
+}
+
+/* custom */
+code[class="language-text"] {
+  color: whitesmoke;
+}
+
+/* ---------------------------- */
+
+/*
+ * prism js highlight
+ */
+
+.gatsby-highlight-code-line {
+  background-color: #022a4b;
+  display: block;
+  margin-right: -1em;
+  margin-left: -1em;
+  padding-right: 1em;
+  padding-left: 0.75em;
+  border-left: 0.25em solid #ffa7c4;
+}
+
+/**
+ * Add back the container background-color, border-radius, padding, margin
+ * and overflow that we removed from <pre>.
+ */
+.gatsby-highlight {
+  background-color: #011627;
+  border-radius: 0.3em;
+  /* border-bottom-left-radius: 0.3em; */
+  /* border-bottom-right-radius: 0.3em; */
+  /* margin: 0.5em 0; */
+  /* margin-bottom: 1.75rem; */
+  padding: 1em;
+  overflow: auto;
+  /* max-width: 52rem; */
+}
+
+/**
+ * Remove the default PrismJS theme background-color, border-radius, margin,
+ * padding and overflow.
+ * 1. Make the element just wide enough to fit its content.
+ * 2. Always fill the visible space in .gatsby-highlight.
+ * 3. Adjust the position of the line numbers
+ */
+.gatsby-highlight pre[class*="language-"] {
+  background-color: transparent;
+  margin: 0;
+  padding: 0;
+  overflow: initial;
+  float: left;
+  min-width: 100%;
+}
+
+/**
+ * If you already use line highlighting
+ * Adjust the position of the line numbers
+ */
+.gatsby-highlight pre[class*="language-"].line-numbers {
+  padding-left: 2.8em;
+}
+
+/*
+ * code title
+ */
+.custom-code-title,
+.gatsby-code-title {
+  /* margin-bottom: -0.3rem; */
+  margin-top: 1rem;
+  padding: 0.5em 1em;
+  font-family: "Courier New", Courier, monospace;
+  background-color: black;
+  color: white;
+  z-index: 0;
+
+  border-top-left-radius: 0.3em;
+  border-top-right-radius: 0.3em;
+}
+div.gatsby-code-title + div.gatsby-highlight98,
+div.custom-code-title + div.gatsby-highlight {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.gatsby-highlight > pre > code[class] {
+  font-family: "Courier New", Courier, monospace;
+}
+.gatsby-highlight > pre > code[class$="table"] {
+  font-family: "Source Code Pro Black It", Consolas, "Andale Mono WT",
+    "Andale Mono", "Lucida Console", "Lucida Sans Typewriter",
+    "DejaVu Sans Mono", "Bitstream Vera Sans Mono", "Liberation Mono",
+    "Nimbus Mono L", Monaco, "Courier New", Courier, monospace;
+}
+
+code.language-text {
+  padding: 2px 4px;
+  font-weight: bold;
+  margin: 0 2px;
+}
