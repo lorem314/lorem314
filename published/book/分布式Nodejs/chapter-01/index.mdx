@@ -1,0 +1,565 @@
+---
+title: "为何选用分布式"
+created: "2022-01-20"
+tags: ["NodeJS"]
+
+coverImage: "../cover.jpg"
+
+updated: "2022-01-20"
+
+chapterNo: "1"
+chapterOf: "分布式Nodejs"
+---
+
+import { Link } from "gatsby"
+import { Tip, Note, BorderBlock } from "../../../../src/components/html/block"
+
+Node.js 能够使 JavaScript 代码运行在服务器上。它提供了能够执行 JavaScript 代码的引擎和多个允许应用程序代码访问底层操作系统，或与外部世界进行交互的 API。但这些你可能都已经耳熟能详了。
+
+本章将从高层次对 Node.js 进行分析，着眼于 JavaScript 的单线程，这既是它最大的优势也是它最大的弱点的特性，同时也是以分布式方式运行 Node.js 如此重要的部分原因。
+
+本章的最后会实现一个小型的服务器程序作为示例和全书的开发基准，每章我们都会为该服务器程序添加功能，或是利用其进行性能测试。
+
+如果你对 Node.js 和 JavaScript 语言已经有了足够多的了解，可以直接跳到 <Link to="#示例应用程序">1.4 示例应用程序</Link> 。
+
+JavaScript 语言正在逐步从单线程过渡到多线程。 例如，Atomics 对象提供了协调不同线程之间通信的机制，而 SharedArrayBuffer 的实例可以跨线程写入和读取。在撰写本书时，多线程 JavaScript 仍未在社区中流行起来。今天的 JavaScript 是多线程的，但单线程仍然是其语言和生态系统的本质。
+
+## JavaScript 的单线程特性
+
+与大多数编程语言一样，JavaScript 大量使用函数。函数是一种组合相关工作单元的方法。函数中也可以调用其他函数，每次一个函数调用另一个函数时，都会将其代码作为 1 帧添加到**调用堆栈(call stack)**中，多次调用则会使调用堆栈越堆越高。调用堆栈有高度限制，若是不小心编写了一个会无限调用自身的递归函数时，会报 RangeError: Maximum call stack size exceeded 错误，即调用堆栈达到了他所能接收的最大函数的数量。
+
+<Note>
+
+最大调用堆栈大小一般由 JavaScript 的引擎来定义。比如，第 14 版的 Node.js 使用的 V8 JavaScript 引擎的最大调用堆栈大小为 15,000 帧。
+
+</Note>
+
+但 JavaScript 与其他一些语言的不同之处在于，它不会在其代码的整个生命周期内将自己限制在单个调用堆栈中运行。例如，当我几年前编写 PHP 时，PHP 脚本的整个生命周期（生命周期与服务 HTTP 请求所需的时间直接相关）与单个堆栈相关，随着请求完成后消失。
+
+JavaScript 通过**事件循环(event loop)**处理并发 —— 同时执行多项操作。在<Link to="#Nodejs-中的事件循环">1.3 Node.js 中的事件循环</Link>小结中会对其进行更多的介绍，但现在只需将它视为一个无限运行的循环，不断检查是否有其他代码要执行。如果有了需要执行的代码时，它便去执行，且是在一个新的调用堆栈中执行。一旦代码全部执行完毕，它会继续等待，直到又有了其他需要执行的代码。
+
+<!-- 翻译 到 这里 了  -->
+
+代码 1-1 展示了如何在函数中调用其他函数。
+
+首先，在**当前堆栈(current stack)**中运行`a()`函数，之后由事件循环调度，执行使用`setTimeout()`函数注册、已经在宏队列中排队等待执行的`x()`函数。前堆栈中的任务全部完成后，事件循环开始检查是否有待执行的代码。事件循环只有在一个堆栈中的任务全部执行完成后，才会开始检查待执行代码的有无。示例代码中下一步要做的便是运行`x()`函数。
+
+```javascript:title=代码 1-1 多个 JavaScript 堆栈的示例
+function a() { b(); }
+function b() { c(); }
+function c() { /**/ }
+
+function x() { y(); }
+function y() { z(); }
+function z() { /**/ }
+
+setTimeout(x, 0);
+a();
+```
+
+图示 1-1 是上述代码示例的可视化。注意有两个独立的堆栈，并且每个堆栈的深度会随着更多函数的调用而增加。横轴代表时间，每个函数中的代码需要时间来执行。
+
+![多个 JavaScript 堆栈的可视化](Figure_1-1_Visualization-of-multiple-JavaScript-stacks.png)
+
+`setTimeout(x, 0)` 函数本质上是在说，在 0 毫秒之后执行 `x()` 函数。在程序运行到 setTimeout 一行时，x 函数不会立即执行，因为当前事件循环正在处理 a 函数所在的堆栈，也就是程序刚开始运行时所在的堆栈，当前堆栈(current stack)。严格的来讲，x 函数也不会在当前堆栈完成后马上执行，因为事件循环需要一些时间（少到可以忽略）来准备新的调用堆栈。所以，即使函数 x 被安排在 0 毫秒后运行，实际上在代码真正运行前仍需要几毫秒，随着应用程序负载的增加，这几毫秒也会增加。
+
+另一件要记住的事是，函数可能需要很长时间才能运行。如果 `a()` 函数运行了 100 毫秒，那么 `x()` 函数运行的最早时间是 101 毫秒。因此，需要将函数中的事件参数视为调用函数的最早时间。一个需要长时间来执行的函数有可能会阻碍事件循环对其他堆栈的调度，因为事件循环会一直卡在该函数上，直到处理完毕才会处理下一个堆栈。
+
+<BorderBlock>
+
+<center>面试问题</center>
+
+下面这个问题我常会出给来面试的人，示例 1-2 中的代码，会输出什么。另外，它们会在第几毫秒时输出。
+
+```javascript:title=示例 1-2 JavaScript 计时问题
+setTimeout(() => console.log("A"), 0)
+console.log("B")
+
+setTimeout(() => console.log("C"), 100)
+setTimeout(() => console.log("D"), 0)
+
+let i = 0
+while (i < 1_000_000_000) {
+  // 假设该循环需要 500 毫秒来完成
+  let ignore = Math.sqrt(i)
+  i++
+}
+
+console.log("E")
+```
+
+写下 A-E 的输出顺序，并预测会在多少毫秒时输出。答案及讲解在表 1-1.
+
+</BorderBlock>
+
+现在先暂时放下调用堆栈，来说一说本节中最有趣的部分。
+
+由于 JavaScript 应用程序都以单线程方式运行，因此不会同时执行两个调用堆栈，换句话说就是两个函数不能并行执行。这就意味着需，要寻找某种另外的方式，同时运行应用程序的多个副本，以允许应用程序**扩展(scale)**。
+
+目前有很多工具可用于更方便地管理应用程序的多个副本。<Link to="../chapter-03/#Cluster-模块">3.1 Cluster 模块</Link>一节中，将使用 Node.js 内置的 cluster 模块将传入的 HTTP 请求发送到不同的应用程序实例副本。另一个内置模块 worker_threads 也能使多个 JavaScript 实例同时运行，child_process 模块可以用来生成并管理完整的 Node.js 进程。
+
+但是，上述方法中的每一种，JavaScript 一次只能执行应用程序中的某一行代码，即每个 JavaScript 环境仍然有自己独特的全局变量，并且它们之间不能共享对象引用。
+
+由于**对象(objects)**不能直接与上述三种方法共享，因此需要一些其他方法来在被相互隔离的 JavaScript 上下文之间进行通信。这样的功能确实存在，称为**消息传递(message passing)**。消息传递通过在单独的隔离之间共享某种对象/数据（例如 JSON）的**序列化(serialization)**表示来工作。这是必要的，因为直接共享对象是不可能的，更不用说如果两个单独的隔离可以同时修改同一个对象，那将是一个痛苦的调试体验。这些类型的问题被称为**死锁(deadlocks)**和**竞争条件(race conditions)**。
+
+<Note>
+
+通过使用 worker_threads 模块，在两个 JavaScript 代码实例中共享内存是可能的，可通过创建 SharedArrayBuffer 实例，并用 postMessage(value) 方法传递数据给其他进程，数据以字节数组的方式可被多个线程同时读写。
+
+</Note>
+
+消息传递时，数据的序列化和反序列化可能会带来性能上的开销。诸如此类的开销在支持多进程的编程语言中不会被考虑到，毕竟变量可以直接被共享。
+
+这就是为何 Node.js 应用有必要以分布式的形式运行的最大原因之一。为了能够将 JavaScript 应用扩展的足够大，需要运行足够多的拷贝实例，这样 Nodejs 进程的任何单个实例都不会完全耗尽其可用 CPU。
+
+了解了 JavaScript(支持 Node.js 的语言)，是时候了解一下 Node.js 本身了。
+
+表 1-1 提供了之前面试问题的解答。
+
+```table:title=表1-1面试问题解答
+┌───────┬────────┬────────┬────────┬────────┬────────┐
+│  Log  │   B    │   E    │   A    │   D    │   C    │
+├───────┼────────┼────────┼────────┼────────┼────────┤
+│ Time  │  1 ms  │ 501 ms │ 502 ms │ 502 ms │ 502 ms │
+└───────┴────────┴────────┴────────┴────────┴────────┘
+```
+
+首先， `setTimeout()` 函数将输出 A 的函数设定为 0 毫秒后运行，放入宏队列，但这并不一定意味着 A 一定会在 0 毫秒后被输出，它会在当前堆栈运行结束后，尽可能地在第 0 毫秒时输出。接着，输出 **B**。之后输出 C 地函数被设定为尽可能地在 100 毫秒后运行，D 是在 0 毫秒后。
+
+之后程序遇到循环，耗时 500 毫秒。循环完成后，直接输出 **E**。此时当前堆栈运行完毕，只有一个堆栈被执行。
+
+之后事件循环寻找待执行地代码去执行。检查宏任务队列，有三个任务待执行，执行顺序基于被设置的时间，其次基于放入队列的先后顺序。首先放入的是 0 毫秒后输出 A 的函数，至此，程序已经运行了 500 毫秒，而 A 应该在 0 毫秒时输出，超时了 500 毫秒，即立即输出 **A**。C 由于被设定在 100 毫秒后实行，即使时间已经过了，根据先后顺序应先考虑其他设定时间小于 100 毫秒的任务。D 同样被设定为 0 毫秒后输出，同 A 相同，超时了 500 毫秒，立即输出 **D**。最后考虑 C，输出 **C**。
+
+## Node.js 速览
+
+Node.js 通过回调，使其的内部模块符合持续传递模式(Continuation-Passing Style, CPS)。回调函数，一般作为当作参数传递，并当任务完成后，通过事件循环被执行。用 JavaScript 的说法，异步执行是指，函数之后会在一个新的调用堆栈中被执行。相反的，当一个函数在同一个调用堆栈中被其他函数调用，则为同步执行。
+
+持续时间较长的这一类任务，是典型的读写(I/O)任务。例如，应用程序需要执行两个任务，任务 A 是从硬盘中读取文件，任务 B 是向第三方服务器发送 HTTP 请求。如果某个操作需要两个任务同时进行 —— 如向 HTTP 请求回复 —— 则应用程序可以并行执行两个任务，如图示 1-2(右) 。如果它们无法同时被执行，或是它们必须被先后执行 —— 则向 HTTP 回复的总时间会变得稍长。
+
+![顺序与并行IO的可视化](./Figure_1-2_Visualization-of-sequential-versus-parallel-IO.png)
+
+乍一看，这好像违反了 JavaScript 单线程的本质。Node.js 应用怎么能狗同时又读文件又发送 HTTP 请求呢？
+
+这也正是其有趣之处。Node.js 本身是**多线程**的，Node.js 的底层由 C++ 语言实现，其中包含了第三方工具如 libuv，它主要处理操作系统抽象和读写操作，和 v8(JavaScript 引擎) 及其他第三方模块。再上一层，Node.js 捆绑层，也存在一些 C++代码。只有 Node.js 的最高层，是用 JavaScript 编写的，如 Node.js 的部分 API 和由用户提供的 npm 库。图示 1-3 展示了不同层级间的关系。
+
+<!-- “用户空间”是从操作系统借来的一个术语，意思是内核之外的用户应用程序可以运行的空间。 对于 Node.js 程序，它指的是应用程序代码和 npm 包——基本上，所有东西都没有内置到 Node.js 中。 -->
+
+![Nodejs的层级](./Figure_1-3_The-layers-of-Nodejs.png)
+
+在内部，libuv 维护一个线程池来管理 I/O 操作，以及像 crypto 和 zlib 这样的 CPU 密集型操作。 这是一个有限大小的池，允许发生 I/O 操作。 如果池只包含四个线程，则只能同时读取四个文件。 考虑示例 1-3，其中应用程序尝试读取文件，执行一些其他工作，然后处理文件内容。 尽管应用程序中的 JavaScript 代码能够运行，但 Node.js 内部的一个线程正忙于将文件的内容从磁盘读取到内存中。
+
+```javascript:title=示例 1-3 Nodejs 线程
+const fs = require("fs")
+
+fs.readFile("/etc/passwd", // 1
+  (err, data) => { // 4
+    if (err) throw err
+    console.log(data)
+  }
+)
+
+setImmediate( // 2
+  () => { //3
+    console.log("This runs while file is being read")
+  }
+)
+```
+
+1. Node.js 读取 /etc/passwd。 它是由 libuv 安排的。
+2. Node.js 在新堆栈中运行回调。 它是由 V8 安排的。
+3. 一旦前一个堆栈结束，就会创建一个新堆栈并打印一条消息。
+4. 文件读取完成后，libuv 将结果传递给 V8 事件循环。
+
+<Tip>
+
+libuv 线程池大小默认为 4，最大为 1,024，并且可以通过设置 UV_THREADPOOL_SIZE=[threads] 环境变量来覆盖。在平时实践中很少会对其进行修改，只有在进行过基准测试的最终生产环境中才会对其进行修改。在 macOS 笔记本电脑上本地运行的应用程序的行为与在 Linux 服务器上的容器中运行的应用程序非常不同。
+
+</Tip>
+
+在内部，Node.js 维护了一个待完成的异步任务列表。此列表用于保持进程运行。当堆栈完成并且事件循环寻找更多工作要做时，如果没有更多操作可以让进程保持活动状态，它将退出。这就是为什么一个不做任何异步操作的非常简单的应用程序能够在堆栈结束时退出的原因。例如下面的代码例子:
+
+```javascript
+console.log("打印，然后退出。")
+```
+
+执行了 console.log 后，进程会马上退出。但是，一旦创建了异步任务，这足以使进程保持活跃，如下:
+
+```javascript
+setInterval(() => {
+  console.log("进程将持续执行...")
+}, 1_000)
+```
+
+有许多 Node.js API 调用会导致创建使进程保持活跃状态。例如，当一个 HTTP 服务器被创建后，它将永远保持该进程运行。一个创建后马上就关闭的服务器一般不会应用到实际当中。
+
+Node.js API 中有一个常见模式，可以将此类对象配置为不再使进程保持活动状态。其中一些比其他更明显。例如，如果一个监听 HTTP 服务器端口被关闭，那么进程可能会选择结束。 此外，其中许多对象都附加了一对方法，`unref()` 和 `ref()`。前者用于告诉对象不再保持进程处于活动状态，后者则相反。示例 1-4 演示了这种情况。
+
+```javascript:title=示例 1-4 常见的ref()和unref()方法
+const t1 = setTimeout(() => {}, 1_000_000) // 1
+const t2 = setTimeout(() => {}, 2_000_000) // 2
+// ...
+t1.unref() // 3
+// ...
+clearTimeout(t2) // 4
+```
+
+1. 设置一个异步操作，保持进程运行，该进程在 1000 秒后退出。
+2. 第二个异步操作，该进程在 2000 秒后退出。
+3. t1 调用 unfer 方法，回调仍会在 1000 秒后执行，但不会保持该进程运行。
+4. t2 计时器被清除，且回调不会被调用。同样，没有了需要执行地异步操作，线程会退出。
+
+上述例子凸显了 Node.js 的另一个特性：浏览器中的 JavaScript 会和 Node.js 中的 JavaScript 表现得有些差异。比如 setTimeout 函数，在浏览器中返回一个整型数，但在 Node.js 中返回一个 object，其中有着其他属性和上面提到的 ref、unref 等可调用的方法。
+
+我们多次提到了**事件循环**一词，现在我们再更进一步地来认识它。
+
+## Node.js 中的事件循环
+
+无论是运行在浏览器中地 JavaScript 还是 Nodejs 中地 JavaScript，都有事件循环机制。相同之处在于，它们都被用于在不同地堆栈中处理异步任务地调度和执行；不同之处在于，浏览器中地事件循环经过优化，更好地驱动单页面应用程序，Node.js 中地事件循环能够更好地在服务器上运行。该小节讲解 Node.js 中的事件循环。理解事件循环的基础不仅能更好的让我们了解应用程序中代码的执行先后，也可以避免将 bug 引入应用程序。
+
+顾名思义，事件循环是一个循环。它管理事件队列，该队列又触发回调函数。但是，正如你所料，实现过程远比这微妙得多。当 IO 事件发生时，回调执行，像是套接字接收到消息，修改磁盘中的文件，setTimeout 回调执行等。
+
+在底层，操作系统注意到，该线程中发生了某些事。之后，其中的 libuv 代码跳出来，尝试解决。如果合适，消息向上传递到 Node.js 的 API 中，最终引起回调函数的执行。事件循环允许底层中的 C++代码逻辑，在 JavaScript 中执行。
+
+### 事件循环阶段
+
+事件循环有几个不同的阶段。 其中一些阶段不直接处理应用程序代码； 例如，有些可能涉及运行内部 Node.js API 所关心的 JavaScript 代码。 图 1-4 提供了处理用户态代码执行的各个阶段的概述。
+
+这些阶段中的每一个都维护一个要执行的回调队列。 根据应用程序如何使用回调，它们将用于不同的阶段。 以下是有关这些阶段的一些详细信息：
+
+- poll 阶段
+  执行 IO 相关的回调。主程序代码开始运行时，就在此阶段。
+- check 阶段
+  通过 setImmediate 调用的回调，在此阶段执行。
+- close 阶段
+  执行通过 EventEmitter close 触发的回调。如 net.Server TCP 服务关闭，触发 close 事件所运行的回调。
+- timers 阶段
+  通过 setTimeout 和 setInterval 触发的回调。
+- pending 阶段
+  特殊系统事件，如 net.Socket TCP 套接字抛出 ECONNREFUSED 错误。
+
+除了上述介绍的，其实还有两个特殊的微队列(microtask queues)，我们可以在上述的阶段运行时，向微队列中添加回调函数。第一个微队列收纳了所有由 process.nextTick()函数注册的回调函数；第二个微队列处理 Promise。微队列中的回调函数的优先级高于事件循环，由 process.nextTick()函数注册的回调函数的优先级又高于 Promise。
+
+<!-- “滴答”是指完整地通过事件循环。 令人困惑的是， setImmediate() 需要一个滴答声才能运行，而 process.nextTick() 更直接，所以这两个函数应该换个名字。 -->
+
+![Nodejs事件循环的不同阶段](Figure_1-4._Notable_phases_of_the_Node.js_event_loop.png)
+
+应用程序开始运行后，事件循环也跟着开始运行，每次处理一个阶段。程序运行的同时，Node.js 将回调函数添加到不同的队列。事件循环进入一个阶段时，将会处理应该在那个阶段运行的所有回调，所有回调都执行完毕后，事件循环移动到下一个阶段。若程序没有待运行的回调，在等待 IO 操作时，他会停在 poll 阶段。
+
+### 代码示例
+
+理论虽好，实践才是关键。下面的例子涉及到了 poll，check 和 timers 三个阶段。
+
+```javascript:title=event-loop-phases.js
+const fs = require("fs")
+
+setImmediate(() => console.log(1))
+Promise.resolve().then(() => console.log(2))
+process.nextTick(() => console.log(3))
+
+fs.readFile(__filename, () => {
+  console.log(4)
+  setTimeout(() => console.log(5))
+  setImmediate(() => console.log(6))
+  process.nextTick(() => console.log(7))
+})
+
+console.log(8)
+```
+
+试着猜出如上代码的输出顺序。
+
+代码从 poll 阶段开始执行。首先，引入 fs 模块。之后，setImmediate 添加回调，将输出 1 的函数添加至 check 阶段。然后是一个已经 resolved 的 promise，将输出 2 的函数添加到 micro 队列。之后是 nextTick，将输出 3 的函数添加到 micro 队列。之后 fs 模块读取文件，将回调放入 poll 阶段，一旦读取完毕就执行。最后是一个普通的输出，输出`8`。
+
+以上是当前调用堆栈，接下来执行两个微队列中的任务。上面说过，nextTick 优先于 promise，所以先输出`3`。由于没有其他的通过 nextTick 添加到 micro 队列中的函数了，接下来执行 promise 微队列中的任务，输出`2`。两个微队列中的任务全部执行完毕， poll 阶段执行完毕。
+
+事件循环进入 check 阶段。之前通过 setImmediate 有一个回调函数，输出`1`。check 阶段的两个微队列均为空，进入下一个阶段，close 阶段。close 阶段为空，没有可执行的回调，继续执行下一个阶段，timers 阶段。同样，timers 阶段为空，pending 阶段也是如此。最后循环回到 poll 阶段。
+
+又回到了 poll 阶段，程序没有其他可执行的代码，则会一直等待文件读取完毕，一旦读取完毕，则执行 fs.readFile 的回调。
+
+文件读取完成，执行 fs.readFile 的回调。首先就是输出 `4`。之后 setTimeout 将输出 5 的函数放到 timers 队列，setImmediate 将输出 6 的函数放到 check 阶段，nextTick 将输出 7 的函数放到微队列。之后 poll 阶段代码全部执行完毕。
+
+检查微队列中的待执行任务，有通过 nextTick 放入的回调，输出`7`。然后是 check 阶段，输出`6`。最后是 timers 阶段，输出`5`。
+
+所以输出顺序为：**8，3，2，1，4，7，6，5**
+
+若使用由`async`关键字定义的异步函数，各代码运行的阶段不变，唯一变化的是语法。我们再来看一个写法更加直观的例子。
+
+```javascript
+const sleep_st = t => new Promise(r => setTimeout(r, t))
+const sleep_im = () => new Promise(r => setImmediate(r))
+
+;(async () => {
+  setImmediate(() => console.log(1))
+  console.log(2)
+  await sleep_st(0)
+  setImmediate(() => console.log(3))
+  console.log(4)
+  await sleep_im()
+  setImmediate(() => console.log(5))
+  console.log(6)
+  await 1
+  setImmediate(() => console.log(7))
+  console.log(8)
+})()
+```
+
+当涉及到以 await 开头的异步函数和语句时，您几乎可以将它们视为使用嵌套回调的代码的语法糖，甚至可以视为 `then()` 调用链。 以下示例是对前面示例的等效写法。
+
+```javascript
+setImmediate(() => console.log(1))
+console.log(2)
+
+Promise.resolve().then(() =>
+  setTimeout(() => {
+    setImmediate(() => console.log(3))
+    console.log(4)
+
+    Promise.resolve().then(() =>
+      setImmediate(() => {
+        setImmediate(() => console.log(5))
+        console.log(6)
+
+        Promise.resolve().then(() => {
+          setImmediate(() => console.log(7))
+          console.log(8)
+        })
+      })
+    )
+  }, 0)
+)
+```
+
+输出顺序为：**2，1，4，3，6，8，5，7**
+
+### 有关事件循环的实用提示
+
+在实际构建 nodejs 应用时，没有必要对事件循环有着如此深度的理解。更多的情况下，只要能跑，不用过多地担心哪一个回调函数先运行。但也有几个有关事件循环的重点是我们应该记住的。
+
+**_不要让事件循环饿着_**。在 current stack 阶段运行太多代码将会拖延事件循环其他阶段的运行，最佳实现之一便是，将 CPU 重工作分成几个小份。例如，需要处理 1000 个数据，我们可以将其分为 10 个 100 份，使用 setImmediate 函数在每次运行完 100 份之后调用，将下一个 100 份交给下一次循环的该阶段。但根据情况来说，设计一个将任务交于子线程来处理的情况更好一些。
+
+记住，**永远不要**使用 `nextTick()` 来分次处理数据。这会使 micro 队列永不为空，程序将永远停在同一个阶段。不同于无限递归函数的调用，代码将不会抛出 RangeError 错误，它会成为一个僵尸进程榨干你的 CPU！就像如下情况：
+
+```javascript
+const nt_recursive = () => process.nextTick(nt_recursive)
+nt_recursive() // setInterval 的回调永远不会执行
+
+setInterval(() => console.log("hi"), 10)
+```
+
+例子中，setInterval 代表程序中的异步函数调用，比如 http 请求的响应。一旦 nt_recursive 函数执行，程序的 micro 队列
+
+```javascript
+const si_recursive = () => setImmediate(si_recursive)
+si_recursive() // setInterval 的回调会执行
+
+setInterval(() => console.log("hi"), 10)
+```
+
+**_不要引入 Zalgo_**。写一个接收回调函数作为参数的函数时，永远要将那个回调函数以异步的方式执行。例如，我们很容易写出如下的代码
+
+```javascript
+// 反模式
+function foo(count, callback) {
+  if (count <= 0) {
+    return callback(new TypeError("count > 0"))
+  }
+  myAsyncOperation(count, callback)
+}
+```
+
+回调有时被同步调用，例如当 count 设置为零时，有时是异步调用，例如当 count 设置为 1 时。 相反，请确保回调在新堆栈中执行，如本例所示
+
+```javascript
+function foo(count, callback) {
+  if (count <= 0) {
+    return process.nextTick(() => callback(new TypeError("count > 0")))
+  }
+  myAsyncOperation(count, callback)
+}
+```
+
+或是用 setImmediate 来注册也可以，只要不引入无限递归便可。如下是为何确保回调函数运行在新的堆栈中很重要的原因。
+
+```javascript
+let bar = false
+
+foo(3, () => {
+  assert(bar)
+})
+
+bar = true
+```
+
+当 foo 的回调函数以同步方式运行时，assert 函数的参数 bar 会是 false；若是异步，之后 bar 的值改为 true，在执行回调，此时 bar 的值是 true。若是程序中还有更多类似 foo 的函数，而且我们不确定它们是同步还是异步执行回调，这会使变量的值十分难以预测。
+
+到目前为止，相信你已经对 nodejs 的内部工作机制有了更进一步的了解，是时候构建一个简易的服务器了。
+
+## 示例应用程序
+
+在这一小节中，我们将构建一组小型的 Node.js 服务器应用程序。该应用程序在本章中会设计得非常简单，暂时不会拥有真实项目中的服务器需求的功能。在之后的章节中，我们会逐渐完善该服务器应用程序，使其成为一个可以服务于企业级应用的 Node.js 后端服务程序。
+
+通过设计一组——两个——应用程序，在之后你可以通过更加灵活有趣的组合方式来测试它们。
+
+第一个例子，**recipe-api**，是一个内部 API 服务程序，只能由内部其他应用程序访问，无法由外部请求访问。
+
+第二个例子，**web-api**，对外是一个 HTTP 服务程序，可由第三方通过网络请求可以访问的 API。
+
+### 服务程序之间的关系
+
+web-api 服务是 recipe-api 的下游，相反，recipe-api 是 web-api 的上游。 图 1-5 是这两个服务之间关系的可视化。
+
+![web-api和recipe-api之间的关系](Figure_1-5._The_relationship_between_web-api_and_recipe-api.png)
+
+这两个应用程序都可以称为服务器，因为它们都在主动侦听传入的网络请求。 但是，在描述这两个 API 之间的具体关系时（图 1-5 中的箭头 B），可以将 web-api 称为客户端/消费者，将 recipe-api 称为服务器/生产者。 第 2 章重点介绍了这种关系。 当提到 web browser 和 web-api 的关系时（图 1-5 中的箭头 A），浏览器称为 client/consumer，webapi 则称为 server/producer。
+
+现在是时候检查这两个服务的源代码了。 由于这两个服务将在本书中不断发展，现在是为它们创建一些示例项目的好时机。 创建一个分布式节点/目录来保存您将为本书创建的所有代码示例。 除非另有说明，否则您将运行的大多数命令都要求您位于此目录中。 在此目录中，创建 web-api/、recipe-api/ 和 shared/ 目录。 前两个目录将包含不同的服务表示。 shared/ 目录将包含共享文件，以便于应用本书中的示例。
+
+<!-- 在实际场景中，任何共享文件都应通过源代码管理签入或通过 npm 包作为外部依赖项加载。 -->
+
+您还需要安装所需的依赖项。 在两个项目目录中，运行以下命令：
+
+```shell
+npm init -y
+```
+
+这将为您创建基本的 package.json 文件。 完成后，从代码示例的顶部注释中运行适当的 npm install 命令。 代码示例在整本书中都使用此约定来传达需要安装哪些包，因此您需要在此之后自行运行 init 和安装命令。 请注意，每个项目将开始包含多余的依赖项，因为代码示例正在重用目录。 在现实世界的项目中，只有必要的包应该被列为依赖项。
+
+### 生产者服务器
+
+现在设置已经完成，是时候查看源代码了。 示例 1-6 是一个内部 Recipe API 服务，一个提供数据的上游服务。 对于此示例，它将仅提供静态数据。 现实世界的应用程序可能会从数据库中检索数据。
+
+```shell
+npm install fastify@3.2
+```
+
+```javascript:title=示例 1-6 recipe-api/producer-http-basic.js
+const server = require("fastify")()
+const HOST = process.env.HOST || "127.0.0.1"
+const PORT = process.env.PORT || 4000
+
+console.log(`worker pid=${process.pid}`)
+
+server.get("/recipes/:id", async (req, reply) => {
+  console.log(`worker request pid=${process.pid}`)
+
+  const id = Number(req.params.id)
+  if (id !== 42) {
+    reply.statusCode = 404
+    return { error: "not_found" }
+  }
+  return {
+    producer_pid: process.pid,
+    recipe: {
+      id,
+      name: "Chicken Tikka Masala",
+      steps: "Throw it in a pot...",
+      ingredients: [
+        { id: 1, name: "Chicken", quantity: "1 lb" },
+        { id: 2, name: "Sauce", quantity: "2 cups" },
+      ],
+    },
+  }
+})
+
+server.listen(PORT, HOST, () => {
+  console.log(`Producer running at http://${HOST}:${PORT}`)
+})
+```
+
+<Tip>
+
+```
+#!/usr/bin/env node
+```
+
+文件的第一行，以#开头的内容，叫做 shebang，或 hashbang。其由当年创造 Unix 的人设计，用于指定脚本的解释器。当一个文件的首行为 shebang，且为可运行文件时（通过 chmod +x filename.js 完成），我们可以直接通过 `./filename.js`来执行文件，而不必再加上 node 命令，比如 node filename.js。
+
+</Tip>
+
+此服务准备就绪后，您可以在两个不同的终端窗口中使用它。 执行以下命令； 第一个启动 recipe-api 服务，第二个测试它正在运行并可以返回数据：
+
+<!-- 本书中的许多示例都需要两个人运行多个进程，其中一些充当客户端，一些充当服务器。 因此，您通常需要在单独的终端窗口中运行进程。 一般来说，如果你运行一个命令并且它没有立即退出，它可能需要一个专用的终端。 -->
+
+```shell
+node recipe-api/producer-http-basic.js # 控制台 1
+curl http://127.0.0.1:4000/recipes/42  # 控制台 2
+```
+
+然后，您应该会看到如下 JSON 输出（为清楚起见添加了空格）：
+
+```json
+{
+  "producer_pid": 25765,
+  "recipe": {
+    "id": 42,
+    "name": "Chicken Tikka Masala",
+    "steps": "Throw it in a pot...",
+    "ingredients": [
+      { "id": 1, "name": "Chicken", "quantity": "1 lb" },
+      { "id": 2, "name": "Sauce", "quantity": "2 cups" }
+    ]
+  }
+}
+```
+
+### 消费者服务器
+
+第二个服务是面向公众的 Web API 服务，它不包含那么多数据，但更复杂，因为它会发出一个出站请求。 将示例 1-7 中的源代码复制到位于 web-api/consumer-http-basic.js 的文件中。
+
+```shell
+npm install node-fetch@2.6
+```
+
+该依赖提供了 fetch 方法，能使我们在服务端向网页中那样使用 fetch 方法请求网络资源。
+
+```javascript:title=示例 1-7 web-api/consumer-http-basic.js
+const server = require("fastify")()
+const fetch = require("node-fetch")
+
+const HOST = process.env.HOST || "127.0.0.1"
+const PORT = process.env.PORT || 3000
+const TARGET = process.env.TARGET || "localhost:4000"
+
+server.get("/", async () => {
+  const req = await fetch(`http://${TARGET}/recipes/42`)
+
+  const producer_data = await req.json()
+  return {
+    consumer_pid: process.pid,
+    producer_data,
+  }
+})
+
+server.listen(PORT, HOST, () => {
+  console.log(`Consumer running at http://${HOST}:${PORT}/`)
+})
+```
+
+确保 recipe-api 仍在运行。之后，开启第二个控制台运行 consumer-http-basic.js 文件，并在第三个控制台通过 curl 向这个 url 发送请求
+
+```shell
+node web-api/consumer-http-basic.js # 控制台 1
+curl http://127.0.0.1:3000/         # 控制台 2
+```
+
+控制台输出的数据，是从 producer-http-basic 处所获得的数据的一个超集。
+
+```json
+{
+  "consumer_pid": 25670,
+  "producer_data": {
+    "producer_pid": 25765,
+    "recipe": {
+      "id": 42,
+      "name": "Chicken Tikka Masala",
+      "steps": "Throw it in a pot...",
+      "ingredients": [
+        { "id": 1, "name": "Chicken", "quantity": "1 lb" },
+        { "id": 2, "name": "Sauce", "quantity": "2 cups" }
+      ]
+    }
+  }
+}
+```
+
+其中，producer_id 是运行 producer-http-basic 文件所创建的进程的进程 id，consumer_id 是运行 consumer-http-basic 文件的进程 id。在返回的数据中包含两者的 pid，能清楚的展示出他们来自不同的进程。在同一台机器上，两者不应重复，但在大型的、分布式的系统中，两者有可能相同。

@@ -1,0 +1,166 @@
+---
+title: "React中key的作用"
+created: "2022-04-20"
+tags: ["React", "Hooks"]
+
+links: {
+	bdCloud: "",
+	biliVideo: "",
+}
+
+updated: "2022-03-11"
+coverImage: "./cover.jpg"
+---
+
+## React 中的 key 属性
+
+在 React 中，如果用一个数组变量的 map 方法，输出多个 div 标签时，我们应该在 map 方法的回调函数所返回的 JSX 的最外层的元素上，添加 key 属性。就像下面这样：
+
+```jsx
+const posts = [
+  {
+    id: "post-1",
+    title: "标题-1",
+  },
+  {
+    id: "post-2",
+    title: "标题-2",
+  },
+]
+
+const Posts = posts.map(post => {
+  // highlight-next-line
+  return <div key={post.id}>{post.title}</div>
+})
+```
+
+否则的话，React 会报如下错误：
+
+<aside>❗ Warning: Each child in a list should have a unique "key" prop.</aside>
+
+[官方](https://reactjs.org/docs/lists-and-keys.html#keys)给出的对 key 的描述如下：
+
+> Keys help React identify which items have changed, are added, or are removed. Keys should be given to the elements inside the array to give the elements a stable identity.
+
+> Key 帮助 React 认出，哪一个元素可能被改动、被添加、或是被移除了。Key 应该被赋予到数组中的每个元素上，好让他们有一个稳定的身份（识别）。
+
+从中我们可以看出，既然需要被识别出，就不能有两个元素的 key 值相同的情况发生。
+
+## 不用 key 的危害
+
+我们先来看一个例子，一个简单的点餐 demo。
+
+<iframe
+  src="https://codesandbox.io/embed/reactzhong-keyde-zuo-yong-li-zi-1-po07l?fontsize=14&hidenavigation=1&theme=dark"
+  style="width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;"
+  title="React中key的作用-例子1"
+  allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
+  sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
+></iframe>
+
+通过菜单的下拉菜单选择菜品，点击添加加入到购物单，可以追加注释到购物单中的菜品，如不吃辣、或是多放肉之类的。后添加的菜显示在最上面。
+
+现在按照如下步骤操作：
+
+1. 选择一个你喜欢的食物，添加
+2. 再选择一个你喜欢的食物，添加
+3. 对于你在步骤 2 中选择的食物，分别在有 key 和没有 key 的列表中的食物后的输入框中，输入一些备注
+4. 再选择一个你喜欢的食物，添加
+
+操作完成后可以看出区别。有 key 的列表中，在第 ③ 步骤中添加的食物的备注仍在第二个食物后面；而没有 key 的列表中，添加的备注跑到了第 ④ 步骤中添加的食物后。
+
+这是因为在没有 key 时，React 只能区分元素的位置，无法判别具体是那个元素。在添加备注时，被添加备注的元素为数组中的第一个元素，而在又添加了一个食物后，新添加的食物成了数组中的第一个元素。
+
+当然新添加的食物在数组中的位置完全取决于代码，你可以将其添加至最前面，最后面，亦或是中间的某个位置。在上述的程序中，是放到了最前面的。
+
+```jsx
+const handleSubmit = () => {
+  // 放在最前面
+  setOrders([newOrder, ...orders])
+
+  // 放在最后面
+  setOrders([...orders, newOrder])
+
+  // 放在中间某个位置
+  const index = orders.find(() => {
+    // ...通过 find 或是其他函数，找到目标位置的前一个元素的 index
+  })
+  // 由于 splice 方法是在原数组上修改，所以要解构一下引起 React 重新渲染
+  setOrders([...orders.splice(index, 0, newOrder)])
+}
+```
+
+<br />
+
+<a
+  href="https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Array/splice"
+  target="_blank"
+>
+  MDN splice 方法
+</a>
+
+当我们用 map 函数的回调函数中的 index 参数作为 key 值时也会出现这种情况，理由同样，但这次 React 记住了是第 key=1 的元素后有备注，但新食物添加后，新食物成了第一个元素，所以备注还是会跑到新添加的食物后面。
+
+我们再来看另外一个例子。
+
+通过下拉菜单选择不同的选项，在 input 中显示不同的标语。
+
+```jsx
+<div>
+  <select id="topic" value={key} onChange={e => setKey(e.target.value)}>
+    <option value="training">Training</option>
+    <option value="consulting">Consulting</option>
+    <option value="question">Question</option>
+  </select>
+  // highlight-next-line
+  <input id="subject" key={key} defaultValue={defaultValuesByTopic[key]} />
+</div>
+```
+
+key 值赋予在 input 元素上，这种情况下的 key 没有在循环中。
+
+<iframe
+  src="https://codesandbox.io/embed/reactzhong-keyde-zuo-yong-li-zi-2-b7b0gc?fontsize=14&hidenavigation=1&theme=dark"
+  style="width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;"
+  title="React中key的作用-例子2"
+  allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
+  sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
+></iframe>
+
+一开始下拉菜单都停留在 training 一项上，后面的标语也都为 I would like some training。分别对有无 key 的表单的标语进行修改，修改后从下拉菜单中选择另外一项。此时，有 key 的表单中的标语也随之变化，无 key 的表单中的标语没有变化。
+
+## key 的真正作用
+
+在第一个例子中，key 配合 map，这种类似循环的方法使用，也可以像第二个例子中，直接赋值给一个标签。
+
+而 key 在 React 中的真正机制是，当一个组件的 key 值发生变化时，react 会强制**重新渲染**该组件。不同于组件的 props 或内部 state 变化而引发的组件**更新**，重新渲染就像该组件首次渲染一样，如果是类组件，则会触发 componentWillUnmount、componentDidMount 等生命周期方法，如果是函数组件，则会触发空数组作为依赖的 useEffect 中的回调函数。
+
+<iframe
+  src="https://codesandbox.io/embed/dazzling-goldwasser-bpipki?fontsize=14&hidenavigation=1&theme=dark"
+  style="width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;"
+  title="dazzling-goldwasser-bpipki"
+  allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
+  sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
+></iframe>
+
+## key 的值
+
+再次引用官网的原文
+
+> The best way to pick a key is to use a string that uniquely identifies a list item among its siblings.
+
+> key 值的最好选择，是能够将其从兄弟姐妹元素中区分开来的字符串。
+
+如数据库查询的返回结果上，一般都会带有一个`_id`属性的字符串，这就是作为 key 值的一个很好的选择。
+
+在第一个应用程序例子中，使用 map 回调函数中的 index 参数作为 key 值同样会引发问题。但在某些特殊情况下，也可以使用其作为 key 值。
+
+例子中的数组长度会随用户输入而改动，若我们确定一定以及肯定，一个数组的长度，在整个应用程序的生命周期中都不会发生变化、且内部元素不会被重新排序，那么在输出它时则可以使用 index 作为 key 值。
+
+## 参考文章
+
+- [https://kentcdodds.com/blog/understanding-reacts-key-prop](https://kentcdodds.com/blog/understanding-reacts-key-prop)
+- [https://dev.to/francodalessio/understanding-the-importance-of-the-key-prop-in-react-3ag7](https://dev.to/francodalessio/understanding-the-importance-of-the-key-prop-in-react-3ag7)
+- [https://robinpokorny.com/blog/index-as-a-key-is-an-anti-pattern/](https://robinpokorny.com/blog/index-as-a-key-is-an-anti-pattern/)
+- [https://medium.com/swlh/understanding-the-importance-of-the-key-prop-in-react-f2b92ce65f45](https://medium.com/swlh/understanding-the-importance-of-the-key-prop-in-react-f2b92ce65f45)
+- [https://reactjs.org/docs/lists-and-keys.html#keys](https://reactjs.org/docs/lists-and-keys.html#keys)

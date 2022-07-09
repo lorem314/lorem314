@@ -1,0 +1,225 @@
+---
+title: "从零构建简易 ReactRouter"
+created: "2022-04-01"
+tags: ["React", "Router"]
+
+links: {
+	bdCloud: "",
+	biliVideo: "",
+}
+
+subtitle: ""
+coverImage: "./cover.jpg"
+updated: "2020-08-12"
+---
+
+## 从零构建 React-Router
+
+[https://dev.to/thomascullen/build-a-react-router-clone-from-scratch-38dp](https://dev.to/thomascullen/build-a-react-router-clone-from-scratch-38dp)
+
+在该文章中，构建一个基于第六版 API、简易版本的 React-Router 。
+
+React-Router 内部由`history`库处理路由历史。该文章只实现网页端的路由，即静态路由。
+
+```jsx
+function Products() {
+  return (
+    <>
+      <h4>Example Products</h4>
+      <ul>
+        <li>
+          <Link to="/products/1">Product One</Link>
+        </li>
+        <li>
+          <Link to="/products/2">Product Two</Link>
+        </li>
+      </ul>
+    </>
+  )
+}
+
+function Product() {
+  const { id } = useParams()
+  return (
+    <>
+      <h4>Viewing product {id}</h4>
+      <Link to="/">Back to all products</Link>
+    </>
+  )
+}
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/products/:id">
+          <Product />
+        </Route>
+        <Route path="/">
+          <Products />
+        </Route>
+      </Routes>
+    </Router>
+  )
+}
+```
+
+我们的 router 要比 react-router 中的 router 的功能简单得多。只对子组件提供 location 和 push 方法。
+
+首先我们需要最根部的`Router`组件，它相当于一个最外部的 Provider，通过子组件中的代码引起自身 state 变化，重新渲染子组件。
+
+下面来定义该 context
+
+```jsx
+const RouterContext = React.createContext({
+  location: "",
+  push: () => {},
+})
+```
+
+Router 组件将自己的 children 组件包裹在 RouterContext.Provider 中，并提供 location 变量和 push 方法。还需要监听 window 中的 popstate 事件，用户使用浏览器前进后退时也会引起渲染变化。
+
+```jsx
+function Router({ children }) {
+  const [location, setLocation] = React.useState(window.location.pathname)
+
+  const handlePush = useCallback(newLocation => {
+    window.history.pushState({}, "", newLocation)
+    setLocation(newLocation)
+  }, [])
+
+  const handleHashChange = useCallback(() => {
+    setLocation(window.location.pathname)
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener("popstate", handleHashChange)
+    return () => window.removeEventListener("popstate", handleHashChange)
+  }, [handleHashChange])
+
+  const value = useMemo(() => {
+    return { location, push: handlePush }
+  }, [location, handlePush])
+
+  return (
+    <RouterContext.Provider value={value}>{children}</RouterContext.Provider>
+  )
+}
+```
+
+引起当前路由更新，我们需要创建`Link`组件，接收表示路径的 to 参数，当点击时，使用 context 中的 push 方法将 to 代表的路径添加到 window.history 中，同时引起渲染更新。
+
+```jsx
+function Link({ to, children }) {
+  const { push } = React.useContext(RouterContext)
+
+  function handleClick(e) {
+    e.preventDefault()
+    push(to)
+  }
+
+  return (
+    <a href={to} onClick={handleClick}>
+      {children}
+    </a>
+  )
+}
+```
+
+还需要实际渲染页面的`Route`组件，它的作用只是简单的渲染子组件
+
+```jsx
+function Route({ children }) {
+  return children
+}
+```
+
+接下来时 Routes 组件，它的子组件是多个 Route 组件，他将筛选所有的 Route 组件，渲染当前 url 与 to 提供的路径相匹配的组件。
+
+```jsx
+function compilePath(path) {
+  const keys = []
+
+  path = path.replace(/:(\w+)/g, (_, key) => {
+    keys.push(key)
+    return "([^\\/]+)"
+  })
+
+  const source = `^(${path})`
+
+  const regex = new RegExp(source, "i")
+  return { regex, keys }
+}
+```
+
+分离 url 中的动态变量的匹配
+
+```jsx
+compilePath("/posts/:id")
+// => { regex: /^(/posts/([^\/]+))/i, keys: ["id"] }
+```
+
+用 matchRoutes 方法来筛选出符合条件的组件
+
+```jsx
+function matchRoutes(children, location) {
+  const matches = []
+
+  React.Children.forEach(children, route => {
+    const { regex, keys } = compilePath(route.props.path)
+    const match = location.match(regex)
+
+    if (match) {
+      const params = match.slice(2)
+      matches.push({
+        route: route.props.children,
+        params: keys.reduce((collection, param, index) => {
+          collection[param] = params[index]
+          return collection
+        }, {}),
+      })
+    }
+  })
+
+  return matches[0]
+}
+```
+
+我们再来创建另一个 context
+
+```jsx
+const RouteContext = React.createContext({
+  params: {},
+})
+
+function Routes({ children }) {
+  const { location } = useContext(RouterContext)
+  const match = useMemo(
+    () => matchRoutes(children, location),
+    [children, location]
+  )
+
+  const value = useMemo(() => {
+    return { params: match.params }
+  }, [match])
+
+  // if no routes matched then render null
+  if (!match) return null
+
+  return (
+    <RouteContext.Provider value={value}>{match.route}</RouteContext.Provider>
+  )
+}
+```
+
+截至目前，我们的 router 能正常工作了，但却少了一个关键，需要向子组件提供 url 中的参数。
+
+```jsx
+function useParams() {
+  return useContext(RouteContext).params
+}
+```
+
+Done！
+
+## 这时一个关于超长标题会不会引起 toc-container 显示滚动条的测试

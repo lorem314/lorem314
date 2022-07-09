@@ -1,0 +1,267 @@
+---
+title: "Hooks 中的 DependencyArray"
+created: "2022-03-22"
+tags: ["React", "Hooks"]
+
+links: {
+	bdCloud: "",
+	biliVideo: "",
+}
+
+coverImage: "./cover.jpg"
+unsplashUrl: "https://images.unsplash.com/photo-1516259762381-22954d7d3ad2?ixlib=rb-1.2.1&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=1189&q=80"
+
+updated: "2022-03-11"
+---
+
+## 何时在 Hooks 中的 dep arr 中添加函数
+
+用户一句话来说就是，什么时候 linter 告诉你添加就什么时候添加。
+
+hooks 设计用来将函数式组合引入 React。
+
+exhaustive-deps 规则。
+
+有多个 hook 使用 dependency array 概念，
+
+```jsx
+function ComposeMessage() {
+  const [message, setMessage] = useState()
+
+  // Changing the title every time the message changes is a side-effect,
+  // so it needs to go in `useEffect`
+  useEffect(() => {
+    document.title = message
+    // highlight-next-line
+  }, [message])
+
+  return <input type="text" onChange={e => setMessage(e.target.value)} />
+}
+```
+
+effect 回调函数依赖于 message 变量，每次渲染若 message 变量改变，会引起 effect 回调执行。
+
+我们将修改网页标题的功能更改为操作 localStorage，
+
+```jsx
+import { saveToLocalStorage, getFromLocalStorage } from "./saveToLocalStorage"
+
+function ComposeMessage({ uid }) {
+  const [message, setMessage] = useState(getFromLocalStorage(uid) || "")
+
+  useEffect(() => {
+    saveToLocalStorage(uid, message)
+    // highlight-next-line
+  }, [uid, message]) // our effect now depends on more things
+
+  return (
+    <input
+      type="text"
+      value={message}
+      onChange={e => setMessage(e.target.value)}
+    />
+  )
+}
+```
+
+linter 现在会推荐你把 uid 加入到 effect 的 dependency array 中。
+
+但 uid 是 props 不是 state
+
+准确的来说，uid 不是 ComposeMessage 组件的 state，那他也会是它父组件或更上层的父组件的 state，概念都一样。
+
+那函数 saveToLocalStorage 呢？我们也需要将其加入到 dependency array 中么？
+
+如上的情况来说，不用。在解释之前，我们来对比一下，如果 saveToLocalStorage 函数是父组件传来的方法时会有什么不同
+
+```jsx
+function ComposeMessage({ uid, defaultMessage, saveToLocalStorage }) {
+  const [message, setMessage] = useState(defaultMessage || "")
+
+  useEffect(() => {
+    saveToLocalStorage(uid, message)
+    // highlight-next-line
+  }, [uid, message, saveToLocalStorage]) // Now it goes here
+
+  return (
+    <input
+      type="text"
+      value={message}
+      onChange={e => setMessage(e.target.value)}
+    />
+  )
+}
+```
+
+现在 linter 会推荐你将`saveToLocalStorage`添加到 dependency array 中。
+
+当通过 import 引入 saveToLocalStorage 函数时，linter 知道该函数由其他文件引入，该函数不可能会对组件的 state 产生改动，从而引起重新渲染。
+
+然而，若通过 prop 引入，linter 并不知道 ComposeMessage 的父组件时如何定义`saveToLocalStorage`方法的，换句话说，linter 不会对所有的 js 文件进行分析，来查找你是如何通过 prop 传入的，即使 linter 确实这么做了，它也不会知道你在将来会如何使用该函数。因为这种不确定性，linter 推荐你将`saveToLocalStorage`函数加入到 dependency array 中。
+
+下面是 ComposeMessage 组件的父组件的一种可能的实现方法。
+
+```jsx
+import { saveToLocalStorage, getFromLocalStorage } from "./saveToLocalStorage"
+
+function UserProfile({ uid }) {
+  return (
+    <ComposeMessage
+      uid={uid}
+      defaultMessage={getFromLocalStorage(uid)}
+      saveToLocalStorage={saveToLocalStorage}
+    />
+  )
+}
+```
+
+即便父组件 UserProfile 也仅仅是通过 import 将 saveToLocalStorage 函数引入，并传入到子组件 ComposeMessage 中，linter 仍会推荐你将`saveToLocalStorage`函数加入到 dependency array 中。
+
+在考虑另一种场景，若子组件 ComposeMessage 不需要知道如 uid 等细节，只是将数据存储在 localstorage 中，
+
+```jsx
+// UserProfile.js
+import ComposeMessage from "./ComposeMessage"
+import { saveToLocalStorage, getFromLocalStorage } from "./saveToLocalStorage"
+
+function UserProfile({ uid }) {
+  return (
+    <ComposeMessage
+      defaultMessage={getFromLocalStorage(uid)}
+      saveToLocalStorage={message => saveToLocalStorage(uid, message)}
+    />
+  )
+}
+
+// ComposeMessage.js
+function ComposeMessage({ defaultMessage, saveToLocalStorage }) {
+  const [message, setMessage] = useState(defaultMessage || "")
+
+  useEffect(() => {
+    saveToLocalStorage(message)
+  }, [message, saveToLocalStorage])
+
+  return (
+    <input
+      type="text"
+      value={message}
+      onChange={e => setMessage(e.target.value)}
+    />
+  )
+}
+```
+
+注意，由父组件传入的 saveToLocalStorage 是一个箭头函数。此时 UserProfile 组件保证了，自己的 props 的 uid 有改动时，message => saveToLocalStorage(uid, message)会生成新的函数签名，从而使子组件每次都能对正确的 uid 进行 saveToLocalStorage 函数的调用。
+
+但若父组件的 props 不止有 uid，若还存在其他 props 或有自己的 state，引起 UserProfile 组件重新渲染时，但 uid 没有改动，此时箭头函数 message => saveToLocalStorage(uid, message)每次都会生成新的函数签名就会显得没有必要了。
+
+使用 useCallback
+
+使用 useCallback hook 来保证函数签名与 uid 同步，即每次只有当 uid 有变动时，来会重新生成 message => saveToLocalStorage(uid, message)的函数签名。
+
+```jsx
+import ComposeMessage from "./ComposeMessage"
+import { saveToLocalStorage, getFromLocalStorage } from "./saveToLocalStorage"
+
+function UserProfile({ uid }) {
+  // highlight-next-line
+  const save = useCallback(
+    message => {
+      saveToLocalStorage(uid, message)
+    },
+    [uid]
+  )
+
+  return (
+    <ComposeMessage
+      defaultMessage={getFromLocalStorage(uid)}
+      // highlight-next-line
+      saveToLocalStorage={save}
+    />
+  )
+}
+```
+
+useCallback hook 创建了一个拥有记忆功能版本的其回调。save 函数将于 uid 保持同步，只有 uid 的值有改动，才会生成新的 save 函数。
+
+1. 父组件`UserProfile`通过 props 向子组件`ComposeMessage`传递了一个函数
+2. 在`ComposeMessage`中，只有两种情况会引起 effect 重新执行
+   - message 变动
+   - `saveToLocalStorage`变动
+3. 父组件可能会重新渲染，从而引起子组件 ComposeMessage 重新渲染，ComposeMessage 的 effect 回调也会重新执行。但当父组件的 uid 没有改变，而引起重新渲染时，我们想要保持`saveToLocalStorage`函数签名与上一次的渲染保持一致从而节约性能，使用 useCallback 来实现该功能。
+4. 父组件的 uid 有改动，useCallback 会重新生成 save 函数，有着不同的函数签名，每次子组件都会获得，带有正确的 uid 作为参数传入的`saveToLocalStorage`函数。
+
+## 总结
+
+> So when does a function need to go in the dependency array? Whenever it could potentially close over state.
+
+```jsx
+const MyComponent = () => {
+  // This function doesn't close over state at this moment
+  function logData() {
+    console.log("logData")
+  }
+
+  useEffect(() => {
+    logData()
+    // highlight-next-line
+  }, []) // `logData` not required in the dependency array
+
+  // ...
+}
+```
+
+```jsx
+const MyComponent = ({ data }) => {
+  // This function DOES close over state now (remember, props
+  // are someone else's state)
+  function logData() {
+    console.log(data)
+  }
+
+  useEffect(() => {
+    logData()
+    // highlight-next-line
+  }, [logData]) // Now we add it here
+
+  // ...
+}
+```
+
+logData 在 deparr 中，此时 logData 每次重新渲染都会生成不同的函数签名。需要用 useCallback
+
+```jsx
+const MyComponent = ({ data }) => {
+  const logData = useCallback(() => {
+    console.log(data)
+  }, [data])
+
+  useEffect(() => {
+    logData()
+  }, [logData]) // Now we add it here
+
+  // ...
+}
+// 或者
+const MyComponent = ({ data }) => {
+  useEffect(() => {
+    function logData() {
+      console.log(data)
+    }
+    logData()
+  }, [data]) // Now, just `data` is needed here
+
+  // ...
+}
+```
+
+`logData`does close over state, but it's apart of the effect itself so we don't need anything but `data`
+ in the array.
+
+```jsx
+linter 知道该函数不可能“关闭”组件状态，当更改时需要重新运行效果。
+```
+
+参考
+
+[https://stackoverflow.com/questions/27092038/what-exactly-does-closing-over-mean](https://stackoverflow.com/questions/27092038/what-exactly-does-closing-over-mean)
